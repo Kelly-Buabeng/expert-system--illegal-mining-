@@ -20,35 +20,52 @@ test("record an assessment, review the reasoning and find it in the history", as
   const community = `Dunkwa ${testInfo.project.name}`;
 
   await page.goto("/assessments/new");
-  await page.getByRole("button", { name: "Run assessment" }).click();
-  await expect(page.getByText("12 values need attention")).toBeVisible();
+  await page.getByRole("button", { name: "Continue to readings" }).click();
+  await expect(page.getByText("1 value needs attention")).toBeVisible();
 
-  await page.getByLabel("Community name").fill(community);
+  await page.getByRole("combobox", { name: "Community name" }).fill(community);
+  await page.getByRole("button", { name: "Continue to readings" }).click();
+  await expect(page.getByRole("heading", { name: "Record the field readings" })).toBeVisible();
+
   for (const [label, value] of Object.entries(READINGS)) {
-    await page.getByLabel(label, { exact: true }).fill(value);
+    await page.getByRole("textbox", { name: label, exact: true }).fill(value);
   }
 
-  // A reload keeps the draft.
+  // A reload keeps both the step (in the URL) and the draft.
   await page.reload();
-  await expect(page.getByLabel("Community name")).toHaveValue(community);
-  await expect(page.getByLabel("PM2.5")).toHaveValue("180");
+  await expect(page.getByRole("heading", { name: "Record the field readings" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "PM2.5" })).toHaveValue("180");
+
+  await page.getByRole("button", { name: "Review readings" }).click();
+  await expect(page.getByRole("heading", { name: "Review before running" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Air quality" })).toContainText("180 µg/m³");
+
+  // The browser back button returns to the previous step.
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Record the field readings" })).toBeVisible();
+  await page.goForward();
 
   await page.getByRole("button", { name: "Run assessment" }).click();
-  await expect(page.getByText(/Assessment saved/)).toBeVisible();
+  await expect(page.getByText("Saved to the assessment history")).toBeVisible();
   await expect(page).toHaveURL(/\/assessments\/\d+$/);
 
-  const verdict = page.getByRole("region", { name: "Overall risk" });
-  await expect(verdict).toContainText("High");
-  await expect(verdict).toContainText("Rated High because Air quality is rated High.");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    `${community} is at high risk from illegal-mining pollution.`,
+  );
   await expect(
     page.getByText("R4.1 matched: PM2.5 was 180 µg/m³ (rule: > 150 µg/m³)."),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Show the 1 rule checked" }).click();
+  await expect(page.getByRole("button", { name: "Hide the rules checked" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
 
   // The result survives a reload because it comes from the database.
   await page.reload();
-  await expect(page.getByRole("heading", { level: 1, name: community })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(community);
 
-  await page.getByRole("link", { name: "All assessments" }).click();
+  await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link").click();
   await page.getByRole("searchbox", { name: "Community" }).fill(community);
   await expect(page).toHaveURL(/q=Dunkwa/);
   await expect(page.getByRole("link", { name: community })).toBeVisible();

@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { AssessmentSummary, RiskLevel } from "../api/types";
 import { PageHeader } from "../components/PageHeader";
-import { RiskLevelTag } from "../components/RiskLevelTag";
-import { EmptyState, ErrorState, LoadingState } from "../components/States";
+import { RiskLabel } from "../components/RiskLabel";
+import { EmptyState, ErrorState, Skeleton } from "../components/States";
+import { Button, ButtonLink } from "../components/ui/Button";
+import { Field } from "../components/ui/Field";
+import { SegmentedControl } from "../components/ui/SegmentedControl";
 import { formatDate, formatDateTime, formatNumber } from "../lib/format";
 import { useKnowledgeBase } from "../lib/knowledgeBase";
 import { useResource } from "../lib/useResource";
@@ -67,6 +70,11 @@ export function HistoryPage() {
   const filtered = q !== "" || risk !== undefined;
   const data = list.data;
 
+  function clearFilters() {
+    setSearchText("");
+    setSearchParams({}, { replace: true });
+  }
+
   let body;
   if (list.error) {
     body = (
@@ -77,19 +85,22 @@ export function HistoryPage() {
       />
     );
   } else if (!data) {
-    body = <LoadingState label="Loading assessments…" />;
+    body = <Skeleton lines={5} label="Loading assessments…" />;
   } else if (data.total === 0 && !filtered) {
     body = (
       <EmptyState
         title="No assessments yet"
         action={
-          <Link className="button button--primary" to="/assessments/new">
+          <ButtonLink to="/assessments/new" variant="primary">
             Start the first assessment
-          </Link>
+          </ButtonLink>
         }
       >
-        Record field readings for a community to get its pollution risk rating, with the reasoning
-        behind it.
+        <p>
+          An assessment rates a community's pollution risk from eleven field readings and records
+          the reasoning behind the result.
+        </p>
+        <p>Each one you run appears here, where you can search and filter them later.</p>
       </EmptyState>
     );
   } else if (data.items.length === 0 && data.total > 0) {
@@ -97,36 +108,23 @@ export function HistoryPage() {
       <EmptyState
         title="Nothing on this page"
         action={
-          <button
-            type="button"
-            className="button button--secondary"
-            onClick={() => updateParams({ page: undefined })}
-          >
-            Go to the first page
-          </button>
+          <Button onClick={() => updateParams({ page: undefined })}>Go to the first page</Button>
         }
       >
-        This page is past the end of the results.
+        <p>This page is past the end of the results.</p>
       </EmptyState>
     );
   } else if (data.items.length === 0) {
     body = (
       <EmptyState
         title="No matching assessments"
-        action={
-          <button
-            type="button"
-            className="button button--secondary"
-            onClick={() => {
-              setSearchText("");
-              setSearchParams({}, { replace: true });
-            }}
-          >
-            Clear filters
-          </button>
-        }
+        action={<Button onClick={clearFilters}>Clear filters</Button>}
       >
-        No assessments match the current search and risk filter.
+        <p>
+          Nothing matches{q ? <> &ldquo;{q}&rdquo;</> : null}
+          {risk ? ` with ${risk.toLowerCase()} overall risk` : null}. Try a shorter name or another
+          risk level.
+        </p>
       </EmptyState>
     );
   } else {
@@ -137,61 +135,65 @@ export function HistoryPage() {
       <div className={list.loading ? "is-refreshing" : undefined} aria-busy={list.loading}>
         <AssessmentTable items={data.items} />
         <nav className="pagination" aria-label="Pagination">
-          <p className="pagination__status" aria-live="polite">
+          <p className="t-meta" aria-live="polite">
             {formatNumber(first)}–{formatNumber(last)} of {formatNumber(data.total)}
           </p>
-          <div className="pagination__buttons">
-            <button
-              type="button"
-              className="button button--secondary"
-              disabled={page <= 1}
-              onClick={() => updateParams({ page: page - 1 > 1 ? String(page - 1) : undefined })}
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              className="button button--secondary"
-              disabled={page >= lastPage}
-              onClick={() => updateParams({ page: String(page + 1) })}
-            >
-              Next
-            </button>
-          </div>
+          {lastPage > 1 && (
+            <div className="pagination__buttons">
+              <Button
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => updateParams({ page: page - 1 > 1 ? String(page - 1) : undefined })}
+              >
+                Previous
+              </Button>
+              <Button
+                size="sm"
+                disabled={page >= lastPage}
+                onClick={() => updateParams({ page: String(page + 1) })}
+              >
+                Next
+              </Button>
+            </div>
+          )}
         </nav>
       </div>
     );
   }
 
   return (
-    <div className="page">
-      <PageHeader title="Assessments" description="Every assessment recorded, newest first." />
+    <div className="history">
+      <PageHeader
+        title="Assessments"
+        lead="Every assessment recorded, newest first. Open one to see its conclusion and the reasoning behind it."
+      />
       <div className="toolbar" role="search">
-        <div className="field field--inline">
-          <label htmlFor="search">Community</label>
-          <input
-            id="search"
-            type="search"
-            className="input"
-            placeholder="Search by name"
-            value={searchText}
-            onChange={(event) => setSearchText(event.target.value)}
-          />
-        </div>
-        <fieldset className="segmented">
-          <legend>Overall risk</legend>
-          {[undefined, ...RISK_FILTERS].map((level) => (
-            <label key={level ?? "all"} className="segmented__option">
+        <div className="toolbar__search">
+          <Field id="search" label="Community">
+            {(control) => (
               <input
-                type="radio"
-                name="risk"
-                checked={risk === level}
-                onChange={() => updateParams({ risk: level, page: undefined })}
+                {...control}
+                type="search"
+                className="input"
+                placeholder="Search by name"
+                value={searchText}
+                onChange={(event) => setSearchText(event.target.value)}
               />
-              <span>{level ?? "All"}</span>
-            </label>
-          ))}
-        </fieldset>
+            )}
+          </Field>
+        </div>
+        <SegmentedControl
+          legend="Overall risk"
+          name="risk"
+          value={risk ?? "all"}
+          options={[
+            { value: "all", label: "All" },
+            ...RISK_FILTERS.map((level) => ({ value: level, label: level })),
+          ]}
+          onChange={(value) =>
+            updateParams({ risk: value === "all" ? undefined : value, page: undefined })
+          }
+        />
       </div>
       {body}
     </div>
@@ -200,27 +202,38 @@ export function HistoryPage() {
 
 function AssessmentTable({ items }: { items: AssessmentSummary[] }) {
   const { factors } = useKnowledgeBase();
+  const navigate = useNavigate();
   return (
-    <table className="data-table">
+    <table className="table history-table">
       <thead>
         <tr>
           <th scope="col">Community</th>
           <th scope="col">Overall risk</th>
-          <th scope="col">Factors</th>
+          <th scope="col">
+            Factors <span className="visually-hidden">, in the order shown on the Rules page</span>
+          </th>
           <th scope="col">Recorded</th>
         </tr>
       </thead>
       <tbody>
         {items.map((item) => (
-          <tr key={item.id}>
+          <tr
+            key={item.id}
+            className="history-table__row"
+            onClick={(event) => {
+              // The community link handles keyboard and modified clicks itself.
+              if ((event.target as HTMLElement).closest("a")) return;
+              navigate(`/assessments/${item.id}`);
+            }}
+          >
             <td data-label="Community">
-              <Link to={`/assessments/${item.id}`} className="data-table__primary">
+              <Link to={`/assessments/${item.id}`} className="history-table__community">
                 {item.community}
               </Link>
-              <span className="data-table__secondary">#{item.id}</span>
+              <span className="history-table__id">#{item.id}</span>
             </td>
             <td data-label="Overall risk">
-              <RiskLevelTag level={item.overall_risk} />
+              <RiskLabel level={item.overall_risk} />
             </td>
             <td data-label="Factors">
               <ul className="factor-strip" aria-label="Factor ratings">
@@ -241,7 +254,7 @@ function AssessmentTable({ items }: { items: AssessmentSummary[] }) {
                 })}
               </ul>
             </td>
-            <td data-label="Recorded">
+            <td data-label="Recorded" className="t-muted">
               <time dateTime={item.created_at} title={formatDateTime(item.created_at)}>
                 {formatDate(item.created_at)}
               </time>

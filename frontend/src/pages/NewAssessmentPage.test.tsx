@@ -1,4 +1,5 @@
 import { screen, within } from "@testing-library/react";
+import type { UserEvent } from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { assessment, knowledgeBase } from "../test/fixtures";
 import { renderApp } from "../test/render";
@@ -23,53 +24,104 @@ const baseRoutes = {
   "GET /api/communities": { body: { items: ["Tarkwa", "Obuasi"] } },
 };
 
-describe("New assessment", () => {
-  it("blocks submission and lists every problem when the form is empty", async () => {
+const field = (name: string) => screen.getByRole("textbox", { name });
+const stepHeading = () => screen.getByRole("heading", { level: 2, name: /\?|readings|running/ });
+
+async function completeCommunity(user: UserEvent, name = "Tarkwa") {
+  await user.type(await screen.findByRole("combobox", { name: "Community name" }), name);
+  await user.click(screen.getByRole("button", { name: "Continue to readings" }));
+  await screen.findByRole("heading", { name: "Record the field readings" });
+}
+
+async function completeReadings(user: UserEvent) {
+  for (const [label, value] of Object.entries(READINGS)) await user.type(field(label), value);
+  await user.click(screen.getByRole("button", { name: "Review readings" }));
+  await screen.findByRole("heading", { name: "Review before running" });
+}
+
+describe("New assessment workflow", () => {
+  it("starts on the community step and will not continue without a name", async () => {
     const requests = mockApi(baseRoutes);
     const { user } = renderApp("/assessments/new");
 
-    await user.click(await screen.findByRole("button", { name: "Run assessment" }));
+    expect(await screen.findByText("Step 1 of 3")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Continue to readings" }));
 
     const summary = screen.getByRole("alert");
-    expect(within(summary).getByText("12 values need attention")).toBeInTheDocument();
+    expect(within(summary).getByText("1 value needs attention")).toBeInTheDocument();
     expect(summary).toHaveFocus();
-    expect(screen.getByLabelText("Water pH")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("combobox", { name: "Community name" })).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(stepHeading()).toHaveTextContent("Which community are you assessing?");
     expect(requests.some((r) => r.method === "POST")).toBe(false);
   });
 
-  it("validates a reading on blur and clears the error once fixed", async () => {
+  it("lists every missing reading before allowing review", async () => {
     mockApi(baseRoutes);
     const { user } = renderApp("/assessments/new");
-    const ph = await screen.findByLabelText("Water pH");
+    await completeCommunity(user);
 
-    await user.type(ph, "15");
+    await user.click(screen.getByRole("button", { name: "Review readings" }));
+    expect(screen.getByText("11 values need attention")).toBeInTheDocument();
+    expect(field("Water pH")).toHaveAttribute("aria-invalid", "true");
+    expect(stepHeading()).toHaveTextContent("Record the field readings");
+  });
+
+  it("does not let a URL skip ahead of incomplete steps", async () => {
+    mockApi(baseRoutes);
+    renderApp("/assessments/new?step=review");
+    expect(
+      await screen.findByRole("heading", { name: "Which community are you assessing?" }),
+    ).toBeInTheDocument();
+  });
+
+  it("validates a reading when the field loses focus and clears the error once fixed", async () => {
+    mockApi(baseRoutes);
+    const { user } = renderApp("/assessments/new");
+    await completeCommunity(user);
+
+    await user.type(field("Water pH"), "15");
     await user.tab();
     expect(screen.getByText("Must be between 0 and 14.")).toBeInTheDocument();
 
-    await user.clear(ph);
-    await user.type(ph, "6");
+    await user.clear(field("Water pH"));
+    await user.type(field("Water pH"), "6");
     expect(screen.queryByText("Must be between 0 and 14.")).not.toBeInTheDocument();
   });
 
-  it("submits the readings and shows the saved result", async () => {
+  it("shows the thresholds the rules use in each reading's hint", async () => {
+    mockApi(baseRoutes);
+    const { user } = renderApp("/assessments/new");
+    await completeCommunity(user);
+    expect(field("PM2.5")).toHaveAccessibleDescription(
+      "Fine particulate matter in the air. Rules use 50 µg/m³ and 150 µg/m³. Unit: µg/m³.",
+    );
+  });
+
+  it("reviews the readings, runs the assessment and opens the saved result", async () => {
     const requests = mockApi({
       ...baseRoutes,
       "POST /api/assessments": { status: 201, body: assessment },
       [`GET /api/assessments/${assessment.id}`]: { body: assessment },
     });
     const { user } = renderApp("/assessments/new");
+    await completeCommunity(user);
+    await completeReadings(user);
 
-    await user.type(await screen.findByLabelText("Community name"), "Tarkwa");
-    for (const [label, value] of Object.entries(READINGS)) {
-      await user.type(screen.getByLabelText(label), value);
-    }
+    const readings = screen.getByRole("region", { name: "Air quality" });
+    expect(readings).toHaveTextContent("PM2.5");
+    expect(readings).toHaveTextContent("95 µg/m³");
+    expect(screen.getByText(/checked against 19 rules/)).toBeInTheDocument();
+
     await user.click(screen.getByRole("button", { name: "Run assessment" }));
+    expect(await screen.findByText("Saved to the assessment history")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Tarkwa is at high risk from illegal-mining pollution.",
+    );
 
-    expect(await screen.findByText(/Assessment saved/)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Tarkwa" })).toBeInTheDocument();
-
-    const post = requests.find((r) => r.method === "POST");
-    expect(post?.body).toEqual({
+    expect(requests.find((r) => r.method === "POST")?.body).toEqual({
       community: "Tarkwa",
       notes: "",
       observations: {
@@ -86,11 +138,21 @@ describe("New assessment", () => {
         health_reports: 4,
       },
     });
-    // The draft is discarded once saved.
     expect(sessionStorage.getItem("assessment-draft")).toBeNull();
   });
 
-  it("shows server-side field errors next to the fields", async () => {
+  it("returns to the readings from the review step to edit a group", async () => {
+    mockApi(baseRoutes);
+    const { user } = renderApp("/assessments/new");
+    await completeCommunity(user);
+    await completeReadings(user);
+
+    await user.click(screen.getByRole("button", { name: "Edit Noise pollution" }));
+    expect(stepHeading()).toHaveTextContent("Record the field readings");
+    expect(field("Noise level")).toHaveValue("88");
+  });
+
+  it("sends the user back to the reading the server rejected", async () => {
     mockApi({
       ...baseRoutes,
       "POST /api/assessments": {
@@ -105,17 +167,16 @@ describe("New assessment", () => {
       },
     });
     const { user } = renderApp("/assessments/new");
-    await user.type(await screen.findByLabelText("Community name"), "Tarkwa");
-    for (const [label, value] of Object.entries(READINGS)) {
-      await user.type(screen.getByLabelText(label), value);
-    }
+    await completeCommunity(user);
+    await completeReadings(user);
     await user.click(screen.getByRole("button", { name: "Run assessment" }));
 
-    expect(await screen.findByText("Noise level: Must be between 0 and 200.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Noise level")).toHaveAttribute("aria-invalid", "true");
+    expect(await screen.findByRole("heading", { name: "Record the field readings" })).toBeVisible();
+    expect(screen.getByText("Must be between 0 and 200.")).toBeInTheDocument();
+    expect(field("Noise level")).toHaveAttribute("aria-invalid", "true");
   });
 
-  it("reports a failure that is not about a field", async () => {
+  it("keeps the readings when the server fails", async () => {
     mockApi({
       ...baseRoutes,
       "POST /api/assessments": {
@@ -124,29 +185,27 @@ describe("New assessment", () => {
       },
     });
     const { user } = renderApp("/assessments/new?community=Obuasi");
-    expect(await screen.findByLabelText("Community name")).toHaveValue("Obuasi");
-    for (const [label, value] of Object.entries(READINGS)) {
-      await user.type(screen.getByLabelText(label), value);
-    }
+    await user.click(await screen.findByRole("button", { name: "Continue to readings" }));
+    await completeReadings(user);
     await user.click(screen.getByRole("button", { name: "Run assessment" }));
 
-    expect(await screen.findByText("The assessment was not saved.")).toBeInTheDocument();
+    expect(await screen.findByText("The assessment was not saved")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run assessment" })).toBeEnabled();
+    expect(screen.getByRole("region", { name: "Community" })).toHaveTextContent("Obuasi");
   });
 
-  it("asks for confirmation before clearing the form", async () => {
+  it("asks for confirmation before starting over", async () => {
     mockApi(baseRoutes);
     const { user } = renderApp("/assessments/new");
-    const community = await screen.findByLabelText("Community name");
-    await user.type(community, "Tarkwa");
+    await user.type(await screen.findByRole("combobox", { name: "Community name" }), "Tarkwa");
 
-    await user.click(screen.getByRole("button", { name: "Clear form" }));
-    await user.click(screen.getByRole("button", { name: "Keep values" }));
-    expect(community).toHaveValue("Tarkwa");
+    await user.click(screen.getByRole("button", { name: "Start over" }));
+    await user.click(screen.getByRole("button", { name: "Keep my readings" }));
+    expect(screen.getByRole("combobox", { name: "Community name" })).toHaveValue("Tarkwa");
 
-    await user.click(screen.getByRole("button", { name: "Clear form" }));
-    const confirm = screen.getByRole("group", { name: "Confirm clearing the form" });
-    await user.click(within(confirm).getByRole("button", { name: "Clear form" }));
-    expect(screen.getByLabelText("Community name")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Start over" }));
+    await user.click(screen.getByRole("button", { name: "Clear everything" }));
+    expect(screen.getByRole("combobox", { name: "Community name" })).toHaveValue("");
+    expect(screen.queryByRole("button", { name: "Start over" })).not.toBeInTheDocument();
   });
 });

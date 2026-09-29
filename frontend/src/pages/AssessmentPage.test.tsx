@@ -7,31 +7,67 @@ import { mockApi } from "../test/server";
 const kb = { "GET /api/knowledge-base": { body: knowledgeBase } };
 
 describe("Assessment result", () => {
-  it("explains the overall rating and each factor", async () => {
+  it("leads with the conclusion and its interpretation", async () => {
+    mockApi({ ...kb, "GET /api/assessments/1": { body: assessment } });
+    renderApp("/assessments/1");
+
+    const conclusion = await screen.findByRole("heading", { level: 1 });
+    expect(conclusion).toHaveTextContent("Tarkwa is at high risk from illegal-mining pollution.");
+    expect(
+      screen.getByText(
+        "Noise pollution is rated High. Of the other factors, 4 are Medium and 1 is Low. The overall risk takes the highest factor rating, so this one factor sets it.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Saved to the assessment history")).not.toBeInTheDocument();
+  });
+
+  it("places every factor on the rating scale", async () => {
+    mockApi({ ...kb, "GET /api/assessments/1": { body: assessment } });
+    renderApp("/assessments/1");
+
+    const scale = await screen.findByRole("table", { name: "Rating of each factor" });
+    const noise = within(scale).getByRole("row", { name: /Noise pollution/ });
+    expect(noise).toHaveTextContent("Rated High");
+    expect(within(scale).getAllByText(/^Rated /)).toHaveLength(6);
+  });
+
+  it("explains which rule decided each factor and reveals the full trace", async () => {
     mockApi({ ...kb, "GET /api/assessments/1": { body: assessment } });
     const { user } = renderApp("/assessments/1");
 
-    const verdict = await screen.findByRole("region", { name: "Overall risk" });
-    expect(within(verdict).getByText("High")).toBeInTheDocument();
-    expect(verdict).toHaveTextContent("Rated High because Noise pollution is rated High.");
-
-    const factors = screen.getAllByRole("listitem").filter((li) => li.className === "factor");
-    expect(factors).toHaveLength(6);
-    const biodiversity = factors[2]!;
+    const reasoning = await screen.findByRole("region", { name: "Reasoning" });
     // Range conditions on one reading are stated once.
-    expect(biodiversity).toHaveTextContent(
+    expect(reasoning).toHaveTextContent(
       "R3.2 matched: Biodiversity loss was 33% (rule: > 20% and ≤ 50%).",
     );
-    expect(biodiversity).toHaveTextContent("Repeat species surveys to confirm the trend.");
 
-    const land = factors[0]!;
-    await user.click(within(land).getByText(/Show reasoning \(4 rules checked\)/));
-    const rules = within(land).getAllByRole("table");
-    expect(rules).toHaveLength(4);
-    expect(within(land).getAllByText("Did not match")).toHaveLength(3);
-    expect(within(land).getByText("Matched")).toBeInTheDocument();
+    const toggle = within(reasoning).getByRole("button", { name: "Show the 4 rules checked" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveTextContent("Hide the rules checked");
 
-    expect(screen.getByRole("link", { name: "Reassess community" })).toHaveAttribute(
+    const trace = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(within(trace).getAllByText("Did not match")).toHaveLength(3);
+    expect(within(trace).getByText("Matched")).toBeInTheDocument();
+    expect(reasoning).toHaveTextContent("there is no confidence score");
+  });
+
+  it("marks the readings that decided a factor and lists next steps by severity", async () => {
+    mockApi({ ...kb, "GET /api/assessments/1": { body: assessment } });
+    renderApp("/assessments/1");
+
+    const evidence = await screen.findByRole("region", { name: "Evidence" });
+    expect(within(evidence).getAllByText("Decisive")).toHaveLength(6);
+    expect(within(evidence).getByText("Heavy metal concentration").parentElement).not.toHaveClass(
+      "is-decisive",
+    );
+
+    const steps = screen.getByRole("region", { name: "Next steps" });
+    const items = within(steps).getAllByRole("listitem");
+    expect(items).toHaveLength(5);
+    expect(items[0]).toHaveTextContent("Noise pollution");
+    expect(within(steps).getByRole("link", { name: "Reassess Tarkwa" })).toHaveAttribute(
       "href",
       "/assessments/new?community=Tarkwa",
     );
@@ -61,6 +97,6 @@ describe("Assessment result", () => {
     const { user } = renderApp("/assessments/1");
     expect(await screen.findByText("This assessment could not be loaded")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByRole("heading", { level: 1, name: "Tarkwa" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Tarkwa");
   });
 });

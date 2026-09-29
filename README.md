@@ -10,25 +10,27 @@ explanation of which rules fired and why.
 
 The screenshots use example readings.
 
-**Assessment result:** the overall risk with its reason, each factor's rating, the rule
-that decided it and a recommended action. Here the reasoning for the first factor is
-expanded to show every rule checked.
+**Assessment result:** a written conclusion and how it was reached, the six factor
+ratings on one scale, the rule that decided each factor (with every rule checked
+behind a toggle), the readings that mattered, and recommended next steps.
 
-![Assessment result with the reasoning for one factor expanded](docs/screenshots/assessment-result.png)
+![Assessment result](docs/screenshots/assessment-result.png)
 
-**New assessment:** readings grouped by risk factor, with units and range checks as you type.
+**New assessment:** a three-step workflow (community, field readings, review and
+run). The rail tracks progress; each reading shows what it measures and the
+thresholds the rules use when it is selected, and is validated as you go.
 
-![New assessment form with a range error on water pH](docs/screenshots/new-assessment.png)
+![Field readings step with a range error on water pH](docs/screenshots/new-assessment.png)
 
-**Assessment history:** search by community, filter by overall risk; the coloured strip
-shows the six factor ratings.
+**Assessments:** search by community and filter by overall risk; the strip shows
+the six factor ratings.
 
-![Assessment history table](docs/screenshots/assessment-history.png)
+![Assessment history](docs/screenshots/assessment-history.png)
 
-**Rules:** the knowledge base as decision tables, generated from the same definitions
-the engine uses.
+**Rules:** the knowledge base as readable rule statements, generated from the same
+definitions the engine uses.
 
-![Rules page showing the deforestation and pollution rules](docs/screenshots/rules.png)
+![Rules page](docs/screenshots/rules.png)
 
 **On a phone:**
 
@@ -66,8 +68,9 @@ backend/                Flask API, rule engine, SQLite persistence
   app/api.py            HTTP endpoints
   tests/                engine regression, validation and API tests
 frontend/               React + TypeScript (Vite)
-  src/pages/            New assessment, Assessment result, History, Rules
-  src/components/       shared layout and UI pieces
+  src/pages/            New assessment (3-step workflow), Assessment result, History, Rules
+  src/components/ui/    Button, Field, SegmentedControl, Disclosure, ConfirmDialog
+  src/styles/           tokens.css (design tokens), base, components and per-screen styles
   e2e/                  Playwright tests against the real backend
 ```
 
@@ -164,6 +167,14 @@ build of the frontend.
   acceptable.
 - **Vite instead of Create React App.** CRA is deprecated and `react-scripts` 5 does
   not support React 19 properly. The frontend is now TypeScript on Vite.
+- **Interface design.** Typography carries the identity: Newsreader (serif) for
+  titles and conclusions, IBM Plex Sans for the interface, IBM Plex Mono for rule
+  IDs, all bundled with the app so it works without a font CDN. Surfaces are warm
+  paper with hairline rules rather than cards; ink is the primary action colour
+  and forest green the single accent. Risk colours are only used for ratings and
+  always sit next to the rating's name. Motion is limited to page entry, step
+  changes, disclosure and the result's rating marks, and is switched off under
+  `prefers-reduced-motion`. Tokens live in `frontend/src/styles/tokens.css`.
 - **SQLite.** One file, no extra service, enough for a field-assessment workload.
   WAL mode and a busy timeout handle concurrent gunicorn workers.
 

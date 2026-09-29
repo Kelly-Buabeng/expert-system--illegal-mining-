@@ -1,14 +1,27 @@
+import type { CSSProperties, ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { Assessment, ConditionTrace, FactorResult, RuleTrace } from "../api/types";
+import type {
+  Assessment,
+  ConditionTrace,
+  Evaluation,
+  FactorResult,
+  RiskLevel,
+  RuleTrace,
+} from "../api/types";
 import { ConditionText } from "../components/ConditionText";
 import { NotFound } from "../components/NotFound";
-import { PageHeader } from "../components/PageHeader";
-import { RiskLevelTag } from "../components/RiskLevelTag";
+import { RiskLabel } from "../components/RiskLabel";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
-import { formatDateTime, formatQuantity, joinNames, operatorSymbol } from "../lib/format";
+import { ButtonLink } from "../components/ui/Button";
+import { Disclosure } from "../components/ui/Disclosure";
+import { formatDateTime, formatQuantity, operatorSymbol } from "../lib/format";
 import { indicatorMap, useKnowledgeBase } from "../lib/knowledgeBase";
+import { interpret } from "../lib/interpret";
 import { useResource } from "../lib/useResource";
+
+const LEVELS: RiskLevel[] = ["Low", "Medium", "High"];
+const SEVERITY: Record<RiskLevel, number> = { Low: 0, Medium: 1, High: 2 };
 
 export function AssessmentPage() {
   const params = useParams();
@@ -21,18 +34,14 @@ export function AssessmentPage() {
   const justCreated = (location.state as { created?: boolean } | null)?.created === true;
 
   if (!valid) return <NotFound />;
-  if (assessment.loading) return <LoadingState label="Loading assessment…" />;
+  if (assessment.loading) return <LoadingState label="Loading the assessment…" />;
   if (assessment.error?.status === 404) {
     return (
       <EmptyState
         title="Assessment not found"
-        action={
-          <Link className="button button--secondary" to="/assessments">
-            View all assessments
-          </Link>
-        }
+        action={<ButtonLink to="/assessments">View all assessments</ButtonLink>}
       >
-        Assessment #{id} does not exist.
+        <p>There is no assessment #{id}. It may have been mistyped.</p>
       </EmptyState>
     );
   }
@@ -45,11 +54,24 @@ export function AssessmentPage() {
       />
     );
   }
-  if (!assessment.data) return <LoadingState label="Loading assessment…" />;
-  return <AssessmentDetail assessment={assessment.data} justCreated={justCreated} />;
+  if (!assessment.data) return <LoadingState label="Loading the assessment…" />;
+  return <AssessmentResult assessment={assessment.data} justCreated={justCreated} />;
 }
 
-function AssessmentDetail({
+/** Indicators that met a condition of the rule that raised a factor above Low. */
+function decisiveIndicators(evaluation: Evaluation): Set<string> {
+  const decisive = new Set<string>();
+  for (const factor of evaluation.factors) {
+    if (factor.level === "Low") continue;
+    const fired = factor.rules.find((rule) => rule.fired);
+    for (const condition of fired?.conditions ?? []) {
+      if (condition.satisfied) decisive.add(condition.indicator);
+    }
+  }
+  return decisive;
+}
+
+function AssessmentResult({
   assessment,
   justCreated,
 }: {
@@ -57,115 +79,182 @@ function AssessmentDetail({
   justCreated: boolean;
 }) {
   const { evaluation } = assessment;
-  const drivers = evaluation.factors.filter((f) => evaluation.drivers.includes(f.id));
+  const level = evaluation.overall_risk;
 
   return (
-    <div className="page">
-      <Link to="/assessments" className="back-link">
-        ← All assessments
-      </Link>
+    <article className="result">
+      <nav className="crumbs" aria-label="Breadcrumb">
+        <Link to="/assessments">Assessments</Link>
+        <span aria-hidden="true">/</span>
+        <span aria-current="page">Assessment {assessment.id}</span>
+      </nav>
 
-      {justCreated && (
-        <div className="alert alert--success" role="status">
-          Assessment saved. It is now part of the assessment history.
-        </div>
-      )}
+      <header className="conclusion reveal">
+        <p className="t-label" style={{ "--i": 0 } as CSSProperties}>
+          Conclusion
+        </p>
+        <h1 className="t-display conclusion__statement" style={{ "--i": 1 } as CSSProperties}>
+          {assessment.community} is at{" "}
+          <span className={`level-word level-word--${level.toLowerCase()}`}>
+            {level.toLowerCase()} risk
+          </span>{" "}
+          from illegal-mining pollution.
+        </h1>
+        <p className="t-lead conclusion__interpretation" style={{ "--i": 2 } as CSSProperties}>
+          {interpret(evaluation)}
+        </p>
+        <p className="t-meta conclusion__meta" style={{ "--i": 3 } as CSSProperties}>
+          Recorded {formatDateTime(assessment.created_at)} · Ruleset {assessment.ruleset_version}
+          {justCreated && (
+            <span className="conclusion__saved" role="status">
+              Saved to the assessment history
+            </span>
+          )}
+        </p>
+      </header>
 
-      <PageHeader
-        eyebrow={`Assessment #${assessment.id}`}
-        title={assessment.community}
-        description={
-          <>
-            Recorded {formatDateTime(assessment.created_at)} · Ruleset {assessment.ruleset_version}
-          </>
-        }
-        actions={
-          <Link
-            className="button button--secondary"
-            to={`/assessments/new?community=${encodeURIComponent(assessment.community)}`}
-          >
-            Reassess community
-          </Link>
-        }
-      />
-
-      <section
-        className={`verdict verdict--${evaluation.overall_risk.toLowerCase()}`}
-        aria-labelledby="verdict-title"
+      <ResultSection
+        index="01"
+        id="ratings"
+        title="Factor ratings"
+        description="Each factor is rated on its own. The highest rating becomes the overall risk."
       >
-        <h2 id="verdict-title" className="verdict__label">
-          Overall risk
-        </h2>
-        <RiskLevelTag level={evaluation.overall_risk} size="large" />
-        <p className="verdict__reason">
-          {evaluation.overall_risk === "Low" ? (
-            <>Every factor is rated Low.</>
-          ) : (
-            <>
-              Rated {evaluation.overall_risk} because{" "}
-              <strong>{joinNames(drivers.map((f) => f.name))}</strong>{" "}
-              {drivers.length === 1 ? "is" : "are"} rated {evaluation.overall_risk}.
-            </>
-          )}{" "}
-          The overall risk is the highest rating among the {evaluation.factors.length} factors.
-        </p>
-      </section>
+        <FactorScale evaluation={evaluation} />
+      </ResultSection>
 
-      <section className="section" aria-labelledby="factors-title">
-        <h2 id="factors-title">Factor ratings</h2>
-        <p className="section__intro">
-          Each factor's rules are checked in order and the first rule that matches decides its
-          rating.
-        </p>
-        <ol className="factor-list">
+      <ResultSection
+        index="02"
+        id="reasoning"
+        title="Reasoning"
+        description="Rules are checked in order and the first one that matches decides the factor's rating."
+      >
+        <ol className="reasoning">
           {evaluation.factors.map((factor) => (
-            <FactorRow key={factor.id} factor={factor} />
+            <FactorReasoning key={factor.id} factor={factor} />
           ))}
         </ol>
-      </section>
+        <aside className="caveat">
+          <p className="t-subheading">About this result</p>
+          <p>
+            Ratings come from fixed thresholds, not a statistical model, so there is no confidence
+            score. The same readings always give the same result, and the conclusion is only as
+            reliable as the readings entered. <Link to="/rules">Read the rules</Link>.
+          </p>
+        </aside>
+      </ResultSection>
 
-      <div className="detail-columns">
-        <Observations assessment={assessment} />
-        <section className="section" aria-labelledby="notes-title">
-          <h2 id="notes-title">Notes</h2>
-          {assessment.notes ? (
-            <p className="notes">{assessment.notes}</p>
-          ) : (
-            <p className="muted">No notes were recorded.</p>
-          )}
-        </section>
-      </div>
-    </div>
+      <ResultSection
+        index="03"
+        id="evidence"
+        title="Evidence"
+        description="The readings as recorded. Readings marked Decisive met a condition of the rule that raised a factor above Low."
+      >
+        <Readings assessment={assessment} />
+      </ResultSection>
+
+      <ResultSection
+        index="04"
+        id="next-steps"
+        title="Next steps"
+        description="Actions recommended for each factor above Low, most severe first."
+      >
+        <NextSteps assessment={assessment} />
+      </ResultSection>
+    </article>
   );
 }
 
-function FactorRow({ factor }: { factor: FactorResult }) {
+interface ResultSectionProps {
+  index: string;
+  id: string;
+  title: string;
+  description: string;
+  children: ReactNode;
+}
+
+function ResultSection({ index, id, title, description, children }: ResultSectionProps) {
+  return (
+    <section className="result-section" aria-labelledby={`${id}-title`}>
+      <header className="result-section__head">
+        <span className="result-section__index mono" aria-hidden="true">
+          {index}
+        </span>
+        <h2 className="t-heading" id={`${id}-title`}>
+          {title}
+        </h2>
+        <p className="t-meta">{description}</p>
+      </header>
+      <div className="result-section__body">{children}</div>
+    </section>
+  );
+}
+
+function FactorScale({ evaluation }: { evaluation: Evaluation }) {
+  return (
+    <table className="scale">
+      <caption className="visually-hidden">Rating of each factor</caption>
+      <thead>
+        <tr>
+          <th scope="col">Factor</th>
+          {LEVELS.map((level) => (
+            <th
+              scope="col"
+              key={level}
+              className={`scale__level scale__level--${level.toLowerCase()}`}
+            >
+              {level}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {evaluation.factors.map((factor, index) => (
+          <tr key={factor.id} style={{ "--i": index } as CSSProperties}>
+            <th scope="row">{factor.name}</th>
+            {LEVELS.map((level) => (
+              <td key={level} className="scale__cell">
+                {factor.level === level ? (
+                  <span className={`scale__mark scale__mark--${level.toLowerCase()}`}>
+                    <span className="visually-hidden">Rated {level}</span>
+                  </span>
+                ) : (
+                  <span className="scale__tick" aria-hidden="true" />
+                )}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function FactorReasoning({ factor }: { factor: FactorResult }) {
   const fired = factor.rules.find((rule) => rule.fired);
   return (
-    <li className="factor">
-      <div className="factor__head">
-        <h3 className="factor__name">{factor.name}</h3>
-        <RiskLevelTag level={factor.level} />
+    <li className="reasoning__item">
+      <div className="reasoning__head">
+        <h3 className="t-subheading">{factor.name}</h3>
+        <RiskLabel level={factor.level} />
       </div>
       {fired && (
-        <p className="factor__why">
-          <span className="rule-id">{fired.id}</span> <FiredReason rule={fired} />
+        <p className="reasoning__because">
+          <FiredReason rule={fired} />
         </p>
       )}
-      <p className="factor__action">
-        <span className="factor__action-label">Recommended action</span> {factor.recommendation}
-      </p>
-      <details className="trace">
-        <summary>
-          Show reasoning ({factor.rules.length} {factor.rules.length === 1 ? "rule" : "rules"}{" "}
-          checked)
-        </summary>
-        <ol className="trace__rules">
+      <Disclosure
+        summary={(open) =>
+          open
+            ? "Hide the rules checked"
+            : `Show the ${factor.rules.length} ${factor.rules.length === 1 ? "rule" : "rules"} checked`
+        }
+      >
+        <ol className="trace">
           {factor.rules.map((rule) => (
             <RuleTraceItem key={rule.id} rule={rule} />
           ))}
         </ol>
-      </details>
+      </Disclosure>
     </li>
   );
 }
@@ -182,7 +271,7 @@ function FiredReason({ rule }: { rule: RuleTrace }) {
   }
   return (
     <>
-      matched:{" "}
+      <span className="rule-id">{rule.id}</span> matched:{" "}
       {[...byIndicator.values()].map((conditions, index) => {
         const [first] = conditions;
         if (!first) return null;
@@ -209,16 +298,16 @@ function FiredReason({ rule }: { rule: RuleTrace }) {
 
 function RuleTraceItem({ rule }: { rule: RuleTrace }) {
   return (
-    <li className={`trace-rule ${rule.fired ? "trace-rule--fired" : ""}`}>
-      <div className="trace-rule__head">
+    <li className={`trace__rule${rule.fired ? " is-fired" : ""}`}>
+      <div className="trace__head">
         <span className="rule-id">{rule.id}</span>
         <span>
           If {rule.match === "all" ? "all" : "any"} of these hold, rate{" "}
-          <strong>{rule.conclusion}</strong>
+          <strong className="trace__conclusion">{rule.conclusion}</strong>
         </span>
-        <span className="trace-rule__outcome">{rule.fired ? "Matched" : "Did not match"}</span>
+        <span className="trace__outcome">{rule.fired ? "Matched" : "Did not match"}</span>
       </div>
-      <table className="trace-table">
+      <table className="trace__table">
         <caption className="visually-hidden">Conditions of rule {rule.id}</caption>
         <thead>
           <tr>
@@ -228,8 +317,22 @@ function RuleTraceItem({ rule }: { rule: RuleTrace }) {
           </tr>
         </thead>
         <tbody>
-          {rule.conditions.map((condition) => (
-            <ConditionRow key={`${condition.indicator}-${condition.operator}`} c={condition} />
+          {rule.conditions.map((c) => (
+            <tr
+              key={`${c.indicator}-${c.operator}`}
+              className={c.satisfied ? "is-met" : "is-unmet"}
+            >
+              <td>
+                <ConditionText
+                  label={c.label}
+                  unit={c.unit}
+                  operator={c.operator}
+                  threshold={c.threshold}
+                />
+              </td>
+              <td className="num">{formatQuantity(c.observed, c.unit)}</td>
+              <td>{c.satisfied ? "Met" : "Not met"}</td>
+            </tr>
           ))}
         </tbody>
       </table>
@@ -237,47 +340,73 @@ function RuleTraceItem({ rule }: { rule: RuleTrace }) {
   );
 }
 
-function ConditionRow({ c }: { c: ConditionTrace }) {
+function Readings({ assessment }: { assessment: Assessment }) {
+  const knowledgeBase = useKnowledgeBase();
+  const indicators = indicatorMap(knowledgeBase);
+  const decisive = decisiveIndicators(assessment.evaluation);
   return (
-    <tr className={c.satisfied ? "is-met" : "is-unmet"}>
-      <td>
-        <ConditionText
-          label={c.label}
-          unit={c.unit}
-          operator={c.operator}
-          threshold={c.threshold}
-        />
-      </td>
-      <td className="num">{formatQuantity(c.observed, c.unit)}</td>
-      <td>
-        <span className="check" aria-hidden="true">
-          {c.satisfied ? "✓" : "✗"}
-        </span>{" "}
-        {c.satisfied ? "Met" : "Not met"}
-      </td>
-    </tr>
+    <>
+      <dl className="readings">
+        {Object.entries(assessment.observations).map(([key, value]) => {
+          const indicator = indicators.get(key);
+          const isDecisive = decisive.has(key);
+          return (
+            <div key={key} className={isDecisive ? "is-decisive" : undefined}>
+              <dt>
+                {indicator?.label ?? key}
+                {isDecisive && <span className="readings__flag">Decisive</span>}
+              </dt>
+              <dd className="num">{formatQuantity(value, indicator?.unit ?? "")}</dd>
+            </div>
+          );
+        })}
+      </dl>
+      <div className="notes">
+        <p className="t-subheading">Assessor's notes</p>
+        {assessment.notes ? (
+          <p className="notes__text">{assessment.notes}</p>
+        ) : (
+          <p className="t-meta">No notes were recorded.</p>
+        )}
+      </div>
+    </>
   );
 }
 
-function Observations({ assessment }: { assessment: Assessment }) {
-  const knowledgeBase = useKnowledgeBase();
-  const indicators = indicatorMap(knowledgeBase);
+function NextSteps({ assessment }: { assessment: Assessment }) {
+  const raised = assessment.evaluation.factors
+    .filter((factor) => factor.level !== "Low")
+    .sort((a, b) => SEVERITY[b.level] - SEVERITY[a.level]);
+  const reassess = `/assessments/new?community=${encodeURIComponent(assessment.community)}`;
+
   return (
-    <section className="section" aria-labelledby="observations-title">
-      <h2 id="observations-title">Field readings</h2>
-      <table className="readings">
-        <tbody>
-          {Object.entries(assessment.observations).map(([key, value]) => {
-            const indicator = indicators.get(key);
-            return (
-              <tr key={key}>
-                <th scope="row">{indicator?.label ?? key}</th>
-                <td className="num">{formatQuantity(value, indicator?.unit ?? "")}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </section>
+    <>
+      {raised.length > 0 ? (
+        <ol className="actions">
+          {raised.map((factor) => (
+            <li key={factor.id}>
+              <RiskLabel level={factor.level} appearance="tag" />
+              <div>
+                <p className="t-subheading">{factor.name}</p>
+                <p className="t-muted">{factor.recommendation}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="t-muted">
+          No factor is above Low. No action is needed beyond routine monitoring; reassess the
+          community when conditions change.
+        </p>
+      )}
+      <div className="result__actions">
+        <ButtonLink to={reassess} variant="primary">
+          Reassess {assessment.community}
+        </ButtonLink>
+        <ButtonLink to="/assessments" variant="quiet">
+          All assessments
+        </ButtonLink>
+      </div>
+    </>
   );
 }

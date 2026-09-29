@@ -1,0 +1,77 @@
+/*
+ * Design tokens.
+ *
+ * The identity comes from type and space rather than containers: an editorial
+ * serif for titles and conclusions, a quiet sans for the interface, warm paper,
+ * hairline rules, and one forest-green accent. Risk colours are semantic only
+ * and are always paired with a text label.
+ */
+:root {
+  color-scheme: light;
+
+  /* Type families */
+  --font-serif: "Newsreader Variable", "Iowan Old Style", Georgia, serif;
+  --font-sans:
+    "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* Type scale. Serif sizes are fluid; interface sizes are fixed. */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-md: 1.125rem;
+  --text-lg: clamp(1.3125rem, 1.2rem + 0.45vw, 1.5rem);
+  --text-xl: clamp(1.875rem, 1.55rem + 1.3vw, 2.625rem);
+  --text-2xl: clamp(2.125rem, 1.5rem + 2.6vw, 3.5rem);
+
+  --leading-tight: 1.15;
+  --leading-snug: 1.35;
+  --leading-body: 1.6;
+
+  /* Colour */
+  --paper: #f7f6f2;
+  --paper-deep: #efede7;
+  --surface: #ffffff;
+  --ink: #191c1a;
+  --ink-2: #474e4a;
+  --ink-3: #676e69;
+  --rule: #e2dfd7;
+  --rule-strong: #c9c5bb;
+
+  --accent: #1f4d3f;
+  --accent-hover: #163a2f;
+  --accent-wash: #e3ece7;
+
+  --low: #2d6a44;
+  --low-wash: #e5efe8;
+  --low-mark: #8fbf9f;
+  --medium: #875200;
+  --medium-wash: #f6ead4;
+  --medium-mark: #d99a2b;
+  --high: #a8261d;
+  --high-wash: #f6e2df;
+  --high-mark: #c2392e;
+
+  /* Space (4px base) */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+  --s-6: 2rem;
+  --s-7: 3rem;
+  --s-8: 4rem;
+  --section: clamp(3rem, 2rem + 4vw, 5.5rem);
+
+  /* Measures */
+  --measure: 36rem;
+  --content: 44rem;
+  --page: 72rem;
+  --gutter: clamp(1rem, 0.5rem + 2.5vw, 2.5rem);
+
+  /* Shape and motion */
+  --radius: 6px;
+  --radius-sm: 4px;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --duration: 220ms;
+}
