@@ -73,3 +73,27 @@ export function toPayload(knowledgeBase: KnowledgeBase, values: FormValues): New
 export function fieldId(key: string): string {
   return `field-${key.replace(".", "-")}`;
 }
+
+export type Step = "community" | "readings" | "review";
+export const STEPS: Step[] = ["community", "readings", "review"];
+
+export function parseStep(value: string | null): Step {
+  return STEPS.find((step) => step === value) ?? "community";
+}
+
+/** The step an error key belongs to. */
+export function stepOf(key: string): Step {
+  return key.startsWith("observations.") ? "readings" : "community";
+}
+
+export function errorsForStep(errors: FormErrors, step: Step): FormErrors {
+  return Object.fromEntries(Object.entries(errors).filter(([key]) => stepOf(key) === step));
+}
+
+/** The first step with invalid input; later steps cannot be reached before it is fixed. */
+export function firstIncompleteStep(knowledgeBase: KnowledgeBase, values: FormValues): Step {
+  const errors = validateForm(knowledgeBase, values);
+  if (Object.keys(errorsForStep(errors, "community")).length > 0) return "community";
+  if (Object.keys(errorsForStep(errors, "readings")).length > 0) return "readings";
+  return "review";
+}
