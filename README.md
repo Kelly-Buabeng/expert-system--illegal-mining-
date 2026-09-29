@@ -6,6 +6,34 @@ factors with fixed threshold rules, combines them into an overall risk of **Low*
 **Medium** or **High**, recommends actions, and saves every assessment with a full
 explanation of which rules fired and why.
 
+## Screenshots
+
+The screenshots use example readings.
+
+**Assessment result:** the overall risk with its reason, each factor's rating, the rule
+that decided it and a recommended action. Here the reasoning for the first factor is
+expanded to show every rule checked.
+
+![Assessment result with the reasoning for one factor expanded](docs/screenshots/assessment-result.png)
+
+**New assessment:** readings grouped by risk factor, with units and range checks as you type.
+
+![New assessment form with a range error on water pH](docs/screenshots/new-assessment.png)
+
+**Assessment history:** search by community, filter by overall risk; the coloured strip
+shows the six factor ratings.
+
+![Assessment history table](docs/screenshots/assessment-history.png)
+
+**Rules:** the knowledge base as decision tables, generated from the same definitions
+the engine uses.
+
+![Rules page showing the deforestation and pollution rules](docs/screenshots/rules.png)
+
+**On a phone:**
+
+<img src="docs/screenshots/mobile-result.png" alt="Assessment result on a phone" width="320">
+
 ## How the reasoning works
 
 ```
